@@ -1,26 +1,38 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"log"
 	"net/http"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a/safaraya_db"
+
+// const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a.oregon-postgres.render.com/safaraya_db"
+
 func main() {
-	http.HandleFunc("/ping", pingHandler)
+	ctx := context.Background()
+
+	log.Println("connecting to database")
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("failed to init db: %v", err)
+	}
+	log.Println("database connection pool established")
+	defer pool.Close()
+
+	srv := &server{db: pool}
+
+	log.Println("registering handlers")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ping", pingHandler)
+	mux.HandleFunc("/users", srv.getUsersHandler)
+	mux.HandleFunc("/", notFoundHandler)
 
 	log.Println("HTTP server listening on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatalf("server failed: %v", err)
-	}
-}
-
-func pingHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	resp := map[string]string{"message": "pong v2"}
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		// Best-effort error response if encoding fails
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 	}
 }
