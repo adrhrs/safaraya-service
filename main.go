@@ -15,7 +15,7 @@ const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n
 func main() {
 	ctx := context.Background()
 
-	log.Println("connecting to database")
+	log.Println("connecting to database..")
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)
