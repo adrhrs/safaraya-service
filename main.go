@@ -8,9 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a/safaraya_db"
+// prod param
+// const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a/safaraya_db"
+const serviceHost = "https://safaraya-service.onrender.com"
 
-// const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a.oregon-postgres.render.com/safaraya_db"
+// local param
+const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a.oregon-postgres.render.com/safaraya_db"
+
+// const serviceHost = "http://localhost:8080"
+const cvDownloadPathTemplate = "/users/%d/cv"
 
 func main() {
 	ctx := context.Background()
@@ -28,7 +34,8 @@ func main() {
 	log.Println("registering handlers")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", pingHandler)
-	mux.HandleFunc("/users", srv.getUsersHandler)
+	mux.HandleFunc("/users", srv.usersHandler)
+	mux.HandleFunc("/users/", srv.userCVHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
 	log.Println("HTTP server listening on :8080")
