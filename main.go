@@ -18,7 +18,7 @@ func main() {
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	resp := map[string]string{"message": "pong"}
+	resp := map[string]string{"message": "pong v2"}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		// Best-effort error response if encoding fails
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
