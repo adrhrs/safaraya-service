@@ -9,12 +9,11 @@ import (
 )
 
 // prod param
-// const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a/safaraya_db"
+const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a/safaraya_db"
 const serviceHost = "https://safaraya-service.onrender.com"
 
 // local param
-const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a.oregon-postgres.render.com/safaraya_db"
-
+// const dbURL = "postgresql://app_user:oXQImTmTbltQWP2v83UoFSDWLHfChivG@dpg-d5kt8n4oud1c73e0aoqg-a.oregon-postgres.render.com/safaraya_db"
 // const serviceHost = "http://localhost:8080"
 const cvDownloadPathTemplate = "/users/%d/cv"
 
@@ -36,6 +35,10 @@ func main() {
 	mux.HandleFunc("/ping", pingHandler)
 	mux.HandleFunc("/users", srv.usersHandler)
 	mux.HandleFunc("/users/", srv.userCVHandler)
+	mux.HandleFunc("/registrations", srv.registrationsHandler)
+	mux.HandleFunc("/registrations/", srv.registrationDetailHandler)
+	mux.HandleFunc("/registration-files", srv.registrationFilesHandler)
+	mux.HandleFunc("/registration-files/", srv.registrationFileHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
 	log.Println("HTTP server listening on :8080")

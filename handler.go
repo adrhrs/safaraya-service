@@ -12,9 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-const maxCVUploadSize = 5 << 20 // 5MB
+const maxUploadSize = 5 << 20 // 5MB
 
 func (s *server) usersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -74,6 +76,16 @@ type createUserRequest struct {
 	Age  *int    `json:"age"`
 }
 
+type createRegistrationRequest struct {
+	FullName       string  `json:"full_name"`
+	JobTitle       *string `json:"job_title"`
+	AddressFull    *string `json:"address_full"`
+	WhatsappNumber string  `json:"whatsapp_number"`
+	Note           *string `json:"note"`
+	ApplicantCount *int    `json:"applicant_count"`
+	VisaType       *string `json:"visa_type"`
+}
+
 func (s *server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("createUser start: method=%s remote=%s", r.Method, r.RemoteAddr)
 	if r.Method != http.MethodPost {
@@ -111,6 +123,401 @@ func (s *server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("createUser encode failed: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+	}
+}
+
+func (s *server) registrationsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.createRegistrationHandler(w, r)
+	default:
+		log.Printf("registrationsHandler invalid method: %s", r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+	}
+}
+
+func (s *server) registrationDetailHandler(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] != "registrations" {
+		notFoundHandler(w, r)
+		return
+	}
+
+	regID, err := uuid.Parse(parts[1])
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_registration_id"})
+		return
+	}
+
+	if len(parts) == 2 {
+		if r.Method == http.MethodGet {
+			s.getRegistrationHandler(w, r, regID)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	notFoundHandler(w, r)
+}
+
+func (s *server) createRegistrationHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("createRegistration start: method=%s remote=%s", r.Method, r.RemoteAddr)
+	if r.Method != http.MethodPost {
+		log.Printf("createRegistration invalid method: %s", r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req createRegistrationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("createRegistration decode failed: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_json"})
+		return
+	}
+
+	if strings.TrimSpace(req.FullName) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "full_name_required"})
+		return
+	}
+
+	if strings.TrimSpace(req.WhatsappNumber) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "whatsapp_number_required"})
+		return
+	}
+
+	if req.ApplicantCount != nil && *req.ApplicantCount < 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_applicant_count"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	log.Println("createRegistration inserting into database")
+	registration, err := s.insertRegistration(ctx, req)
+	if err != nil {
+		log.Printf("createRegistration insert failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(registration); err != nil {
+		log.Printf("createRegistration encode failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+	}
+}
+
+func (s *server) getRegistrationHandler(w http.ResponseWriter, r *http.Request, registrationID uuid.UUID) {
+	log.Printf("getRegistration start: registrationID=%s method=%s remote=%s", registrationID.String(), r.Method, r.RemoteAddr)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	registration, err := s.getRegistrationByID(ctx, registrationID)
+	if err != nil {
+		if errors.Is(err, errRegistrationNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "registration_not_found"})
+			return
+		}
+		log.Printf("getRegistration fetch failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(registration); err != nil {
+		log.Printf("getRegistration encode failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+	}
+}
+
+func (s *server) uploadRegistrationFileHandler(w http.ResponseWriter, r *http.Request, registrationID uuid.UUID) {
+	log.Printf("uploadRegistrationFile start: registrationID=%s method=%s remote=%s", registrationID.String(), r.Method, r.RemoteAddr)
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+1024)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		log.Printf("uploadRegistrationFile parse form failed: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_form"})
+		return
+	}
+
+	fileType := strings.TrimSpace(r.FormValue("file_type"))
+	if fileType == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_type_required"})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		log.Printf("uploadRegistrationFile missing file: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_required"})
+		return
+	}
+	defer file.Close()
+
+	if header.Size > maxUploadSize {
+		log.Printf("uploadRegistrationFile file too large: %d bytes", header.Size)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_too_large"})
+		return
+	}
+
+	buf := bytes.NewBuffer(nil)
+	n, err := io.Copy(buf, io.LimitReader(file, maxUploadSize+1))
+	if err != nil {
+		log.Printf("uploadRegistrationFile read failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	if n > maxUploadSize {
+		log.Printf("uploadRegistrationFile exceeded limit during read: %d bytes", n)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_too_large"})
+		return
+	}
+
+	fileData := buf.Bytes()
+	if len(fileData) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "empty_file"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	fileID, err := s.saveRegistrationFile(ctx, registrationID, fileType, header.Filename, fileData)
+	if err != nil {
+		if errors.Is(err, errRegistrationNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "registration_not_found"})
+			return
+		}
+		log.Printf("uploadRegistrationFile save failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "uploaded",
+		"file_id": fileID.String(),
+	})
+}
+
+func (s *server) registrationFilesHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("registrationFiles start: method=%s remote=%s", r.Method, r.RemoteAddr)
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+1024)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		log.Printf("registrationFiles parse form failed: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_form"})
+		return
+	}
+
+	regIDStr := strings.TrimSpace(r.FormValue("registration_id"))
+	if regIDStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "registration_id_required"})
+		return
+	}
+
+	regID, err := uuid.Parse(regIDStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_registration_id"})
+		return
+	}
+
+	fileType := strings.TrimSpace(r.FormValue("file_type"))
+	if fileType == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_type_required"})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		log.Printf("registrationFiles missing file: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_required"})
+		return
+	}
+	defer file.Close()
+
+	if header.Size > maxUploadSize {
+		log.Printf("registrationFiles file too large: %d bytes", header.Size)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_too_large"})
+		return
+	}
+
+	buf := bytes.NewBuffer(nil)
+	n, err := io.Copy(buf, io.LimitReader(file, maxUploadSize+1))
+	if err != nil {
+		log.Printf("registrationFiles read failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	if n > maxUploadSize {
+		log.Printf("registrationFiles exceeded limit during read: %d bytes", n)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_too_large"})
+		return
+	}
+
+	fileData := buf.Bytes()
+	if len(fileData) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "empty_file"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	fileID, err := s.saveRegistrationFile(ctx, regID, fileType, header.Filename, fileData)
+	if err != nil {
+		if errors.Is(err, errRegistrationNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "registration_not_found"})
+			return
+		}
+		log.Printf("registrationFiles save failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "uploaded",
+		"file_id": fileID.String(),
+	})
+}
+
+func (s *server) registrationFileHandler(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 2 || parts[0] != "registration-files" {
+		notFoundHandler(w, r)
+		return
+	}
+
+	fileID, err := uuid.Parse(parts[1])
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_file_id"})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	s.downloadRegistrationFileHandler(w, r, fileID)
+}
+
+func (s *server) downloadRegistrationFileHandler(w http.ResponseWriter, r *http.Request, fileID uuid.UUID) {
+	log.Printf("downloadRegistrationFile start: fileID=%s method=%s remote=%s", fileID.String(), r.Method, r.RemoteAddr)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	rf, err := s.getRegistrationFile(ctx, fileID)
+	if err != nil {
+		if errors.Is(err, errFileNotFound) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_not_found"})
+			return
+		}
+		log.Printf("downloadRegistrationFile fetch failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal_error"})
+		return
+	}
+
+	if len(rf.Data) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_not_found"})
+		return
+	}
+
+	contentType := http.DetectContentType(rf.Data)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", rf.Filename))
+	if rf.FileSize > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(rf.FileSize, 10))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(rf.Data); err != nil {
+		log.Printf("downloadRegistrationFile write failed: %v", err)
 	}
 }
 
@@ -153,8 +560,8 @@ func (s *server) uploadUserCVHandler(w http.ResponseWriter, r *http.Request, use
 
 	w.Header().Set("Content-Type", "application/json")
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxCVUploadSize+1024)
-	if err := r.ParseMultipartForm(maxCVUploadSize); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+1024)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		log.Printf("uploadUserCV parse form failed: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_form"})
@@ -170,7 +577,7 @@ func (s *server) uploadUserCVHandler(w http.ResponseWriter, r *http.Request, use
 	}
 	defer file.Close()
 
-	if header.Size > maxCVUploadSize {
+	if header.Size > maxUploadSize {
 		log.Printf("uploadUserCV file too large: %d bytes", header.Size)
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_too_large"})
@@ -178,7 +585,7 @@ func (s *server) uploadUserCVHandler(w http.ResponseWriter, r *http.Request, use
 	}
 
 	buf := bytes.NewBuffer(nil)
-	n, err := io.Copy(buf, io.LimitReader(file, maxCVUploadSize+1))
+	n, err := io.Copy(buf, io.LimitReader(file, maxUploadSize+1))
 	if err != nil {
 		log.Printf("uploadUserCV read failed: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -186,7 +593,7 @@ func (s *server) uploadUserCVHandler(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
-	if n > maxCVUploadSize {
+	if n > maxUploadSize {
 		log.Printf("uploadUserCV file exceeded limit during read: %d bytes", n)
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "file_too_large"})
