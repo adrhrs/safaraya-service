@@ -9,6 +9,7 @@ func main() {
 	log.Println("registering handlers")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", pingHandler)
+	mux.HandleFunc("/resolve-shopee-url", resolveShopeeURLHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
 	log.Println("HTTP server listening on :8080")
