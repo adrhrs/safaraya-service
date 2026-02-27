@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 )
 
 func corsAll(next http.Handler) http.Handler {
@@ -20,11 +21,29 @@ func corsAll(next http.Handler) http.Handler {
 	})
 }
 
+// server holds shared dependencies for handlers.
+type server struct {
+	productOffer *ProductOfferClient
+}
+
 func main() {
+	baseURL := "https://open-api.affiliate.shopee.co.id/graphql"
+	appID := "11177960001"
+	secret := "ZPBCHYLXKWPT74E3JU2AMHPWSR6OZ7HW"
+
+	productOfferClient := NewProductOfferClient(ProductOfferClientConfig{
+		BaseURL: baseURL,
+		AppID:   appID,
+		Secret:  secret,
+		Timeout: 30 * time.Second,
+	})
+	srv := &server{productOffer: productOfferClient}
+
 	log.Println("registering handlers")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", pingHandler)
 	mux.HandleFunc("/resolve-shopee-url", resolveShopeeURLHandler)
+	mux.HandleFunc("/get-shopee-item-details/", srv.getShopeeItemDetailsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
 	log.Println("HTTP now server listening on :8080")
