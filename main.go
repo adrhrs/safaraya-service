@@ -27,7 +27,7 @@ func main() {
 	mux.HandleFunc("/resolve-shopee-url", resolveShopeeURLHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
-	log.Println("HTTP server listening on :8080")
+	log.Println("HTTP now server listening on :8080")
 	if err := http.ListenAndServe(":8080", corsAll(mux)); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
