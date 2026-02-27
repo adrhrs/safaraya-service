@@ -62,6 +62,45 @@ const getProductOfferV2ByItemGraphQL = `query GetProductOfferV2ByItem ($itemId: 
   }
 }`
 
+// getProductOfferV2ByKeywordGraphQL is the query for productOfferV2 by keyword (no sortType).
+const getProductOfferV2ByKeywordGraphQL = `query GetProductOfferV2ByKeyword ($keyword: String, $page: Int, $limit: Int) {
+  productOfferV2(keyword: $keyword, page: $page, limit: $limit) {
+    nodes {
+      itemId
+      commissionRate
+      appExistRate
+      appNewRate
+      webExistRate
+      webNewRate
+      commission
+      price
+      sales
+      imageUrl
+      productName
+      shopName
+      productLink
+      offerLink
+      periodEndTime
+      periodStartTime
+      priceMin
+      priceMax
+      productCatIds
+      ratingStar
+      priceDiscountRate
+      shopId
+      shopType
+      sellerCommissionRate
+      shopeeCommissionRate
+    }
+    pageInfo {
+      page
+      limit
+      hasNextPage
+      scrollId
+    }
+  }
+}`
+
 // ProductOfferClientConfig configures the Shopee Product Offer client.
 type ProductOfferClientConfig struct {
 	// BaseURL is the Shopee GraphQL endpoint (e.g. https://partner.shopeemobile.com/graphql or your env-specific URL).
@@ -213,4 +252,57 @@ func (c *ProductOfferClient) GetProductOfferByItemID(ctx context.Context, itemID
 		Limit:    limit,
 		SortType: sortType,
 	})
+}
+
+// GetProductOfferByKeywordRequest is the input for GetProductOfferByKeyword.
+type GetProductOfferByKeywordRequest struct {
+	Keyword string
+	Page    int
+	Limit   int
+}
+
+// GetProductOfferByKeyword calls Shopee's productOfferV2 GraphQL query by keyword (no sortType) and returns the raw JSON response.
+func (c *ProductOfferClient) GetProductOfferByKeyword(ctx context.Context, req GetProductOfferByKeywordRequest) (json.RawMessage, error) {
+	if req.Keyword == "" {
+		return nil, fmt.Errorf("keyword is required")
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = 10
+	}
+	variables := map[string]interface{}{
+		"keyword": req.Keyword,
+		"page":   req.Page,
+		"limit":  limit,
+	}
+	body := map[string]interface{}{
+		"query":     getProductOfferV2ByKeywordGraphQL,
+		"variables": variables,
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(bodyBytes)), nil }
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	rawResponse, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return rawResponse, fmt.Errorf("shopee API returned status %d: %s", resp.StatusCode, string(rawResponse))
+	}
+	return rawResponse, nil
 }

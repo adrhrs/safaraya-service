@@ -115,6 +115,44 @@ func (s *server) getShopeeItemDetailsHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+func (s *server) findSimilarProductHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	if keyword == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "keyword_required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	raw, err := s.productOffer.GetProductOfferByKeyword(ctx, GetProductOfferByKeywordRequest{
+		Keyword: keyword,
+		Page:    0,
+		Limit:   10,
+	})
+	if err != nil {
+		log.Printf("findSimilarProduct GetProductOfferByKeyword failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "shopee_api_failed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(raw); err != nil {
+		log.Printf("findSimilarProduct write failed: %v", err)
+	}
+}
+
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("not found: path=%s method=%s remote=%s", r.URL.Path, r.Method, r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")

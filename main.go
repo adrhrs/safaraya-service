@@ -44,6 +44,7 @@ func main() {
 	mux.HandleFunc("/ping", pingHandler)
 	mux.HandleFunc("/resolve-shopee-url", resolveShopeeURLHandler)
 	mux.HandleFunc("/get-shopee-item-details/", srv.getShopeeItemDetailsHandler)
+	mux.HandleFunc("/find-similar-product", srv.findSimilarProductHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
 	log.Println("HTTP now server listening on :8080")
